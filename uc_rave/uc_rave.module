@@ -1,0 +1,272 @@
+<?php
+
+function uc_rave_menu() {
+  $items['cart/rave/complete'] = array(
+    'title' => 'Order complete',
+    'page callback' => 'uc_rave_complete',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+    'file' => 'uc_rave.pages.inc',
+  );
+    return $items;
+}
+function uc_rave_uc_payment_gateway() {
+  $gateways['uc_rave'] = array(
+    'title' => t('rave'),
+    'description' => t('Process payments through Rave'),
+  );
+  return $gateways;
+}
+function uc_rave_uc_payment_method() {
+  $title = t('Rave (Direct Charge, Debit Cards and USSDs):');
+  $title .= ' ' . theme('image', array(
+    'path' => drupal_get_path('module', 'uc_rave') . '/rave.png',
+    'alt' => 'Pay with Rave',
+    'height' => '65px',
+    'attributes' => array('class' => array('uc-credit-cctype', 'uc-credit-cctype-rave')),
+  ));
+  $methods[] = array(
+    'id' => 'rave',
+    'name' => t('rave'),
+    'title' =>$title,
+    'desc' => t('Pay through rave'),
+    'callback' => 'uc_rave_method',
+    'redirect' => 'uc_rave_form',
+    'weight' => 1,
+    'checkout' => TRUE,
+  );
+
+  return $methods;
+}
+function uc_rave_method($op, &$order) {
+  switch ($op) {
+    case 'settings':
+      $form['uc_rave_env'] = array(
+        '#type' => 'radios',
+        '#title' => t('Environment'),
+        '#description' => t('Select live if you are ready for live payments.'),
+        '#default_value' => variable_get('uc_rave_env'),
+        '#options' => array(
+          'live' => t('Live'),
+          'staging' => t('Staging')
+        )
+      );
+      $form['uc_rave_live_publickey'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Live Public Key'),
+        '#description' => t('Live Public Key'),
+        '#default_value' => variable_get('uc_rave_live_publickey'),
+      );
+      $form['uc_rave_live_secretkey'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Live Secret Key'),
+        '#description' => t('Live Secret Key'),
+        '#default_value' => variable_get('uc_rave_live_secretkey'),
+      );
+      $form['uc_rave_test_publickey'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Test Public Key'),
+        '#description' => t('Test Public Key'),
+        '#default_value' => variable_get('uc_rave_test_publickey'),
+      );
+      $form['uc_rave_test_secretkey'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Test Secret Key'),
+        '#description' => t('Test Secret Key'),
+        '#default_value' => variable_get('uc_rave_test_secretkey'),
+      );
+      $form['uc_rave_logo'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Modal Logo'),
+        '#description' => t('Logo url'),
+        '#default_value' => variable_get('uc_rave_logo'),
+      );
+      $form['uc_rave_title'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Modal Title'),
+        '#description' => t('Modal Title'),
+        '#default_value' => variable_get('uc_rave_title'),
+      );
+      $form['uc_rave_metaname'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Meta Name (optional)'),
+        '#description' => t('Meta Name'),
+        '#default_value' => variable_get('uc_rave_metaname'),
+      );
+      $form['uc_rave_metavalue'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Meta Value (optional)'),
+        '#description' => t('Meta Value'),
+        '#default_value' => variable_get('uc_rave_metavalue'),
+      );
+      $form['uc_rave_currency_code'] = array(
+        '#type' => 'select',
+        '#title' => t('Currency Code'),
+        '#options' => array(
+          'NGN' => t('NGN'),
+          'USD' => t('USD'),
+          'KES' => t('KES'),
+          'EUR' => t('EUR'),
+          'GBP' => t('GBP'),
+          'GHS' => t('GHS'),
+          'ZAR' => t('ZAR'),
+          'UGX' => t('UGX'),
+          'TZS' => t('TZS'),
+	  'RWF' => t('RWF'),
+	  'XOF' => t('XOF'),
+	  'SLL' => t('SLL')
+        ),
+        '#default_value' => variable_get('uc_rave_currency_code', ''),
+      );
+      return $form;
+  }
+}
+
+function uc_rave_form($form, &$form_state, $order) {
+
+  $form['#theme_wrappers'] = array();
+  $time = time();
+  $order_id = $order->order_id;
+  $order_total = number_format($order->order_total, 2, '.', '');
+  $customer_email = $order->primary_email;
+  $cart_id = uc_cart_get_id();
+
+  function getBaseUrl(){
+    $currentPath = $_SERVER['PHP_SELF'];
+    $pathInfo = pathinfo($currentPath);
+    $hostName = $_SERVER['HTTP_HOST'];
+    $protocol = strtolower(substr($_SERVER["SERVER_PROTOCOL"],0,5))=='https://'?'https://':'http://';
+    return $protocol.$hostName.$pathInfo['dirname']."/";
+  }
+  ////
+  function generate_new_txref($length = 10){
+    $characters = 'RSTUVW01234ABCDEFGHIJ56789KLMNOPQXYZ';
+    $charactersLength = strlen($characters);
+    $randomString = '';
+    for ($i = 0; $i < $length; $i++) {
+        $randomString .= $characters[rand(0, $charactersLength - 1)];
+    }
+    return $randomString;
+  }
+  function check_txref($txref){
+      $o_exist = db_query("SELECT * FROM `uc_payment_rave_txref` WHERE `txref` = '".$txref."'")->fetchAll();
+
+      if (count($o_exist) > 0) {
+          $result = true;
+      } else {
+          $result = false;
+      }
+
+      return $result;
+  }
+  function generate_txref(){
+      $txref = 0;
+      $check = true;
+
+      while ($check) {
+          $txref = generate_new_txref();
+          $check = check_txref($txref);
+      }
+
+      return $txref;
+  }
+
+  $data = array(
+    'timestamp' => time(),
+    'order_id' => $order->order_id,
+    'order_total' => number_format($order->order_total, 2, '.', ''),
+    'customer_email' => $order->primary_email,
+    'cart_id' => uc_cart_get_id(),
+  );
+
+  function getRavetxref($order_id,$email){
+    $o_exist = db_query("SELECT * FROM `uc_payment_rave_txref` WHERE `order_id` = '".$order_id."'")->fetchAll();
+    if (count($o_exist) === 0) {
+      $txref = generate_txref();
+      $o_exist = db_query("INSERT INTO `uc_payment_rave_txref` (`txref_id`, `order_id`, `txref`, `email`) VALUES (NULL, '".$order_id."', '".$txref."', '".$email."')");
+
+    } else {
+      $txref = $o_exist[0]->txref;
+    }
+
+    return $txref;
+  }
+
+  $redirectURL  = url('cart/rave/complete/' . uc_cart_get_id(), array('absolute' => TRUE));
+
+  $redirectURL = $redirectURL . '?amount='.$order->order_total.'&currency=' . variable_get('uc_rave_currency_code', 'NGN').'&order_id='. $order_id ;
+
+  $rtxref = getRavetxref($order_id,$order->primary_email);
+  $env = variable_get('uc_rave_env', '');
+  
+  $baseUrl = 'https://api.ravepay.co';
+
+  if ($env == 'staging') {
+    
+    $secretkey = variable_get('uc_rave_test_secretkey', '');
+    $publickey = variable_get('uc_rave_test_publickey', '');
+  } else {
+    
+    $secretkey = variable_get('uc_rave_live_secretkey', '');
+    $publickey = variable_get('uc_rave_live_publickey', '');
+  }
+
+  switch (variable_get('uc_rave_currency_code')) {
+    case 'KES':
+        $country = 'KE';
+        break;
+    case 'GHS':
+        $country = 'GH';
+        break;
+    case 'ZAR':
+        $country = 'ZA';
+        break;
+    case 'TZS':
+        $country = 'TZ';
+        break;
+    
+    default:
+        $country = 'NG';
+        break;
+  }
+  
+
+  $metaData = array(['metaname' => variable_get('uc_rave_metaname', ''), 'metavalue' => variable_get('uc_rave_metavalue', '')]);
+  
+  $postfields = array();
+  $postfields['PBFPubKey'] = $publickey;
+  $postfields['customer_email'] = $order->primary_email;
+  $postfields['customer_firstname'] = $order->billing_first_name;
+  $postfields['customer_lastname'] = $order->billing_last_name;
+  $postfields['country'] = $country;
+  $postfields['custom_logo'] = variable_get('uc_rave_logo', '');
+  $postfields['custom_title'] = variable_get('uc_rave_title', '');
+  $postfields['redirect_url'] = $redirectURL;
+  $postfields['txref'] = $rtxref;
+  $postfields['amount'] = $order->order_total + 0;
+  $postfields['currency'] = variable_get('uc_rave_currency_code', 'NGN');
+  $postfields['hosted_payment'] = 1;
+  ksort($postfields);
+  $stringToHash = "";
+  foreach ($postfields as $key => $val) {
+    $stringToHash .= $val;
+  }
+  $stringToHash .= $secretkey;
+  $hashedValue = hash('sha256', $stringToHash);
+  $transactionData = array_merge($postfields, array('integrity_hash' => $hashedValue), array('meta' => $metaData));
+  $json = json_encode($transactionData);
+  $form['some_text'] = array(
+    '#markup' => "
+		    <form onsubmit='event.preventDefault(); pay();'>
+      <input type='submit' class='form-submit' style='cursor:pointer;' value='Pay with Rave' id='ravepaybutton'/>
+    </form>
+    <script type='text/javascript' src='" . $baseUrl . "/flwv3-pug/getpaidx/api/flwpbf-inline.js'></script>
+    <script>
+    function pay() {
+    var data = JSON.parse('" . json_encode($transactionData = array_merge($postfields, array('integrity_hash' => $hashedValue), array('meta' => $metaData))) . "');
+    getpaidSetup(data);}
+    </script>
+        ");
+        
+  return $form;
+}
