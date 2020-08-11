@@ -1,7 +1,7 @@
 # Rave-Drupal-Ubercart
 Flutterwave's Rave for Drupal Ubercart, compatible with Drupal 7 and uber cart 3
 
-- Contributor - Oluwole Adebiyi (King Flamez)
+- Contributor - Oluwole Adebiyi (King Flamez), Victor Kanyoze aka Dmitri
 - Keywords - ussd, drupal, ucart, rave, flutterwave, account, bank payments, debit-cards, MPESA, ecommerce, drupal ubercart payment.
 
 
